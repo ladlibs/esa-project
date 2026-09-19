@@ -51,12 +51,9 @@ src/
   video_pipeline.py  Stage 4: applies stages 1-3 to every video frame
 ```
 
-**NOT YET BUILT (this is the next work):**
-```
   warning.py         Stage 5: turns a curvature number into a stable,
                                 debounced sharp-turn warning
 ```
-See Section 8 for exact required behavior of this stage.
 
 ### 2.1 `threshold.py` — Color Thresholding
 
@@ -349,19 +346,18 @@ lane paint color/condition) may need these ranges adjusted. Verify with
 footage; if lane lines aren't showing up clearly or there's excessive
 noise, adjust these ranges before trusting anything downstream.
 
-### 6.5 `video_pipeline.py` -> sharp-turn threshold
+### 6.5 `warning.py` -> sharp-turn thresholds
 
 ```python
-if avg_curverad and avg_curverad < 400:
+self.enter_threshold = 300
+self.exit_threshold = 450
 ```
 
-This `400` (meters) is an arbitrary placeholder, not derived from any
-real-world driving standard. Section 8 covers what should replace this.
-Note it is independent of camera/resolution (it operates on the
-already-converted meter value from Section 6.2), but it IS dependent on
-`YM_PER_PIX`/`XM_PER_PIX` being reasonably accurate — a wrong meter
-conversion will make this threshold meaningless even if the code itself
-is correct.
+These values define the hysteresis for triggering and clearing the sharp turn warning. They operate on the already-converted meter value from Section 6.2. 
+- The warning turns ON when the smoothed curvature drops below 300m for a consecutive number of frames.
+- The warning turns OFF only when the smoothed curvature rises above 450m for a consecutive number of frames.
+
+They are dependent on `YM_PER_PIX`/`XM_PER_PIX` being reasonably accurate — a wrong meter conversion will make these thresholds meaningless. Tune these numbers based on empirical testing with target footage.
 
 ---
 
