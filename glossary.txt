@@ -1,0 +1,24 @@
+Camera callibration - skipped - 
+
+Camera calibration only matters if you're using your own camera/dashcam with real distortion you need to correct for accurate real-world curvature (meters).
+                                
+Thresholding 
+Thresholding is the simplest way to turn a grayscale (or single-channel) image into a black-and-white image based on pixel values.
+The idea: every pixel has a number (e.g., 0-255 for brightness or saturation). You pick a cutoff range, and:
+Pixel value falls inside the range → set it to white (255)
+Pixel value falls outside the range → set it to black (0)
+That's it. It's a yes/no decision per pixel: "does this pixel look like what I'm searching for?"
+In your project specifically: you're thresholding the Saturation channel (from hls_s_threshold()) — lane paint tends to have higher saturation than plain grey asphalt, so pixels with saturation between 120-255 get marked white (potential lane pixel), everything else goes black. The yellow_white_mask() function does the same concept but with color ranges instead (HSV values that match "yellow" or "white").
+The result is your binary image — a clean black/white map showing where the lane lines probably are, which is what the rest of the pipeline (region-of-interest crop, perspective warp, curve fitting) operates on.
+
+HLS
+HUE LIGHTNESS SATURATION VALUES
+
+HSV
+HUE SATURATION VALUE
+
+Region of Interest
+The actual region of the lanes marked using a trapezoid to remove trees, shadows, other cars filtered just by using Yellow white and HSL threshold.
+
+Perpective mapping
+Changing the view from the car to birds eye view to remove the vanishing point problem in the earlier and to fit the polynomial curve to find curvature.
