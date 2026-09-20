@@ -19,9 +19,15 @@ import numpy as np
 import sys
 import os
 
-from threshold import combined_binary       # Step 2 (friend's code, unchanged)
+from threshold import combined_binary, region_of_interest       # Step 2 (friend's code, enhanced with Lab/Luv/Sobel)
 from perspective import warp_image          # Step 3 (friend's code, unchanged)
-from curvature import fit_polynomial, measure_curvature_real, YM_PER_PIX, XM_PER_PIX  # Step 4
+from curvature import (
+    fit_polynomial,
+    measure_curvature_real,
+    RobustLaneTracker,
+    YM_PER_PIX,
+    XM_PER_PIX
+)  # Step 4
 from warning import SharpTurnWarningSystem
 
 # Initialize warning system with hysteresis and debounce parameters
@@ -31,6 +37,7 @@ warning_system = SharpTurnWarningSystem(
     smoothing_window=8,
     debounce_frames=5
 )
+lane_tracker = RobustLaneTracker(buffer_size=10)
 
 
 def draw_lane_overlay(original_img, warped_binary, left_fit, right_fit, Minv):
@@ -47,13 +54,13 @@ def draw_lane_overlay(original_img, warped_binary, left_fit, right_fit, Minv):
 
     pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
     pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
-    pts = np.hstack((pts_left, pts_right))
+    # Draw left and right lane outlines in blue (BGR: 255, 0, 0)
+    cv2.polylines(color_warp, np.int_([pts_left]), isClosed=False, color=(255, 0, 0), thickness=30)
+    cv2.polylines(color_warp, np.int_([pts_right]), isClosed=False, color=(255, 0, 0), thickness=30)
 
-    cv2.fillPoly(color_warp, np.int_([pts]), (0, 255, 0))
-
-    # Unwarp the green lane shape back to the original camera perspective
+    # Unwarp the blue lane lines back to the original camera perspective
     newwarp = cv2.warpPerspective(color_warp, Minv, (original_img.shape[1], original_img.shape[0]))
-    result = cv2.addWeighted(original_img, 1, newwarp, 0.3, 0)
+    result = cv2.addWeighted(original_img, 1, newwarp, 1.0, 0)
     return result
 
 
@@ -72,34 +79,34 @@ def annotate_frame(result, avg_curverad, is_sharp_turn):
     return result
 
 
-def process_frame(frame, warning_system):
+def process_frame(frame, warning_system, tracker=lane_tracker):
     """
-    Run the full pipeline on a single video frame. Returns the
-    annotated frame (or the original frame, unmodified, if lane
-    detection fails on this frame -- so the video doesn't crash on a
-    bad frame).
+    Run the full pipeline on a single video frame with temporal tracking.
     """
     try:
         binary = combined_binary(frame)
-        warped_binary, M, Minv = warp_image(binary)
+        roi_binary, _ = region_of_interest(binary)
+        warped_binary, M, Minv = warp_image(roi_binary)
 
-        left_fit, right_fit, _ = fit_polynomial(warped_binary)
-        _, _, avg_curverad = measure_curvature_real(warped_binary, left_fit, right_fit)
+        left_fit, right_fit, ok = tracker.update(warped_binary)
 
-        # Update warning system with the current curvature
-        is_sharp_turn = warning_system.update(avg_curverad)
+        if left_fit is not None and right_fit is not None:
+            _, _, avg_curverad = measure_curvature_real(warped_binary, left_fit, right_fit)
+            is_sharp_turn = warning_system.update(avg_curverad)
+            
+            # Display smoothed curvature value from the warning buffer for visual stability
+            display_curverad = np.median(warning_system.curverad_buffer) if warning_system.curverad_buffer else avg_curverad
+            result = draw_lane_overlay(frame, warped_binary, left_fit, right_fit, Minv)
+            result = annotate_frame(result, display_curverad, is_sharp_turn)
+            return result
+        else:
+            warning_system.update(None)
+            cv2.putText(frame, "Lane not detected", (40, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2, cv2.LINE_AA)
+            return frame
 
-        result = draw_lane_overlay(frame, warped_binary, left_fit, right_fit, Minv)
-        result = annotate_frame(result, avg_curverad, is_sharp_turn)
-        return result
-
-    except (ValueError, IndexError):
-        # Lane pixels not found well on this frame (e.g. shadow, glare).
-        # Just return the frame as-is rather than crashing the video.
-        
-        # Pass None to hold previous state in the warning system
+    except Exception:
         warning_system.update(None)
-        
         cv2.putText(frame, "Lane not detected", (40, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2, cv2.LINE_AA)
         return frame
@@ -125,7 +132,7 @@ def process_video(input_path, output_path="output_images/output_video.mp4"):
         if not ret:
             break
 
-        annotated = process_frame(frame, warning_system)
+        annotated = process_frame(frame, warning_system, lane_tracker)
         writer.write(annotated)
 
         frame_count += 1
@@ -135,6 +142,7 @@ def process_video(input_path, output_path="output_images/output_video.mp4"):
     cap.release()
     writer.release()
     print(f"Done. Saved {frame_count} frames -> {output_path}")
+
 
 
 if __name__ == "__main__":
