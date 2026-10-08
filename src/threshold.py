@@ -55,16 +55,51 @@ def yellow_white_mask(img):
     return combined
 
 
+def extract_robust_binary(img):
+    """
+    Robust thresholding combining:
+      1. Lab B-channel: reliably extracts yellow lines under sunlight & shadows
+      2. Luv L-channel: reliably extracts white lines
+      3. CLAHE-enhanced Sobel X gradient: preserves lane edges across contrast shifts
+    """
+    # 1. Lab B channel for yellow markings
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2Lab)
+    b_channel = lab[:, :, 2]
+    b_binary = np.zeros_like(b_channel)
+    b_binary[(b_channel >= 145) & (b_channel <= 200)] = 255
+
+    # 2. Luv L channel for white markings
+    luv = cv2.cvtColor(img, cv2.COLOR_BGR2Luv)
+    l_channel = luv[:, :, 0]
+    l_binary = np.zeros_like(l_channel)
+    l_binary[(l_channel >= 210) & (l_channel <= 255)] = 255
+
+    # 3. CLAHE-enhanced Sobel X gradient on lightness
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    cl = clahe.apply(gray)
+    sobelx = cv2.Sobel(cl, cv2.CV_64F, 1, 0, ksize=3)
+    abs_sobel = np.absolute(sobelx)
+    scaled_sobel = np.uint8(255 * abs_sobel / (np.max(abs_sobel) + 1e-6))
+    sx_binary = np.zeros_like(scaled_sobel)
+    sx_binary[(scaled_sobel >= 35) & (scaled_sobel <= 100)] = 255
+
+    # Combine thresholds
+    combined = np.zeros_like(b_binary)
+    combined[(b_binary == 255) | (l_binary == 255) | ((sx_binary == 255) & (cl > 160))] = 255
+    return combined
+
+
 def combined_binary(img):
     """
-    Combine the S-channel threshold with the yellow/white color mask.
-    A pixel is kept if EITHER method flags it as a lane pixel.
+    Combine robust Lab/Luv/Sobel thresholding with legacy HLS/HSV masks.
     """
+    robust = extract_robust_binary(img)
     s_binary = hls_s_threshold(img)
     color_mask = yellow_white_mask(img)
 
-    combined = np.zeros_like(s_binary)
-    combined[(s_binary == 255) | (color_mask == 255)] = 255
+    combined = np.zeros_like(robust)
+    combined[(robust == 255) | (s_binary == 255) | (color_mask == 255)] = 255
     return combined
 
 
